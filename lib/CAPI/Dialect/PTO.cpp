@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "mlir-c/Dialect/PTO.h"
+#include "pto-c/Dialect/PTO.h"
 
 // unwrap/wrap + MLIR dialect registration C-API support.
 #include "mlir/CAPI/IR.h"
