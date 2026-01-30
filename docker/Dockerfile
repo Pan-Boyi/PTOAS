@@ -10,6 +10,7 @@ ARG LLVM_TAG=llvmorg-19.1.7
 
 ENV PY_PATH="/opt/python/${PY_VER}"
 ENV PATH="${PY_PATH}/bin:${PATH}"
+ENV ARCH=${ARCH}
 
 # dependency
 RUN dnf install -y ninja-build cmake git ccache gcc-c++ lld && dnf clean all
