@@ -301,6 +301,96 @@ void StoreOp::print(OpAsmPrinter &p) {
   p << " : (" << getDst().getType() << ", " << getSrc().getType() << ") -> ()";
 }
 
+//===----------------------------------------------------------------------===//
+// pto.tdivs custom asm to support both:
+//   pto.tdivs ins(%src, %scalar : !pto.tile_buf<...>, f32) outs(%dst : !pto.tile_buf<...>)
+//   pto.tdivs ins(%scalar, %src : f32, !pto.tile_buf<...>) outs(%dst : !pto.tile_buf<...>)
+// The operand order in the op remains (src, scalar, dst); scalar_lhs is derived
+// from the textual order when not explicitly specified.
+//===----------------------------------------------------------------------===//
+
+ParseResult mlir::pto::TDivSOp::parse(OpAsmParser &parser, OperationState &result) {
+  OpAsmParser::UnresolvedOperand op0, op1, dst;
+  Type ty0, ty1, dstTy;
+
+  if (parser.parseKeyword("ins") || parser.parseLParen() ||
+      parser.parseOperand(op0) || parser.parseComma() ||
+      parser.parseOperand(op1) || parser.parseColonType(ty0) ||
+      parser.parseComma() || parser.parseType(ty1) || parser.parseRParen())
+    return failure();
+
+  if (parser.parseKeyword("outs") || parser.parseLParen() ||
+      parser.parseOperand(dst) || parser.parseColonType(dstTy) ||
+      parser.parseRParen())
+    return failure();
+
+  NamedAttrList attrs;
+  if (parser.parseOptionalAttrDict(attrs))
+    return failure();
+
+  auto tile0 = dyn_cast<mlir::pto::TileBufType>(ty0);
+  auto tile1 = dyn_cast<mlir::pto::TileBufType>(ty1);
+  if ((tile0 && tile1) || (!tile0 && !tile1))
+    return parser.emitError(parser.getCurrentLocation(),
+                            "expected exactly one tile_buf operand and one scalar operand");
+
+  if (!dyn_cast<mlir::pto::TileBufType>(dstTy))
+    return parser.emitError(parser.getCurrentLocation(),
+                            "expected outs type to be !pto.tile_buf<...>");
+
+  const bool scalarFirst = (tile1 != nullptr);
+  const bool scalarLhs = scalarFirst;
+
+  if (Attribute a = attrs.get("scalar_lhs")) {
+    auto b = dyn_cast<BoolAttr>(a);
+    if (!b)
+      return parser.emitError(parser.getCurrentLocation(),
+                              "expected scalar_lhs to be a bool attribute");
+    if (b.getValue() != scalarLhs)
+      return parser.emitError(parser.getCurrentLocation(),
+                              "scalar_lhs attribute conflicts with operand order");
+  } else if (scalarLhs) {
+    attrs.set("scalar_lhs", BoolAttr::get(parser.getContext(), true));
+  }
+
+  if (!scalarFirst) {
+    // ins(%src, %scalar : tile_buf, scalar_ty)
+    if (parser.resolveOperand(op0, ty0, result.operands) ||
+        parser.resolveOperand(op1, ty1, result.operands))
+      return failure();
+  } else {
+    // ins(%scalar, %src : scalar_ty, tile_buf)
+    if (parser.resolveOperand(op1, ty1, result.operands) ||
+        parser.resolveOperand(op0, ty0, result.operands))
+      return failure();
+  }
+
+  if (parser.resolveOperand(dst, dstTy, result.operands))
+    return failure();
+
+  result.addAttributes(attrs);
+  return success();
+}
+
+void mlir::pto::TDivSOp::print(OpAsmPrinter &p) {
+  bool scalarLhs = false;
+  if (auto a = getScalarLhsAttr())
+    scalarLhs = a.getValue();
+
+  p << " ins(";
+  if (!scalarLhs) {
+    p << getSrc() << ", " << getScalar() << " : "
+      << getSrc().getType() << ", " << getScalar().getType();
+  } else {
+    p << getScalar() << ", " << getSrc() << " : "
+      << getScalar().getType() << ", " << getSrc().getType();
+  }
+  p << ") outs(" << getDst() << " : " << getDst().getType() << ")";
+
+  p.printOptionalAttrDict((*this)->getAttrs(),
+                          /*elidedAttrs=*/{"scalar_lhs"});
+}
+
 ParseResult mlir::pto::MakeTensorViewOp::parse(OpAsmParser &parser,
                                                OperationState &result) {
   OpAsmParser::UnresolvedOperand ptr;

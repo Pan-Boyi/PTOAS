@@ -1,6 +1,6 @@
 from mlir.ir import Context, Location, Module, InsertionPoint
 from mlir.dialects import func, arith, pto
-from mlir.ir import F32Type, IndexType
+from mlir.ir import F32Type, IndexType, BoolAttr
 
 
 def build():
@@ -25,11 +25,10 @@ def build():
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_f32], [])
             with InsertionPoint(m.body):
-                fn = func.FuncOp("vec_divs_kernel_2d", fn_ty)
+                fn = func.FuncOp("vec_divs2_kernel_2d", fn_ty)
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):
-                # constants
                 c0 = arith.ConstantOp(IndexType.get(ctx), 0).result
                 c1 = arith.ConstantOp(IndexType.get(ctx), 1).result
                 c32 = arith.ConstantOp(IndexType.get(ctx), 32).result
@@ -37,31 +36,24 @@ def build():
 
                 arg0, arg1 = entry.arguments
 
-                # %0/%1/%2 = pto.make_tensor_view %arg?, shape=[%c32,%c32] strides=[%c32,%c1]
-                # 这里用原生 builder：通常签名会是 (result_type, ptr, shape, strides)
                 tv0 = pto.MakeTensorViewOp(tv2_f32, arg0, [c32, c32], [c32, c1]).result
                 tv1 = pto.MakeTensorViewOp(tv2_f32, arg1, [c32, c32], [c32, c1]).result
 
-                # Replace the immediate values with constants
                 sv0 = pto.SubviewOp(tile_view_32, tv0, [c0, c0], [c32, c32]).result
                 sv1 = pto.SubviewOp(tile_view_32, tv1, [c0, c0], [c32, c32]).result
 
-                # %5/%6/%7 = pto.alloc_tile : <32x32xf32>
                 tb0 = pto.AllocTileOp(tile_buf_32).result
                 tb1 = pto.AllocTileOp(tile_buf_32).result
+                tb_out = pto.AllocTileOp(tile_buf_32).result
 
-                # pto.load_dps_tb ins(%sv) outs(%tb)
-                # 原生 builder 一般会把 optional operands/attrs 做成可选参数
-                pto.TLoadOp(None, sv0, tb0)  # result=None
-                pto.TLoadOp(None, sv1, tb1)  # result=None
+                pto.TLoadOp(None, sv0, tb0)
+                pto.TLoadOp(None, sv1, tb1)
 
-                pto.TDivSOp(tb0, scale, tb1)
+                op = pto.TDivSOp(tb0, scale, tb_out)
+                op.operation.attributes["scalar_lhs"] = BoolAttr.get(True)
 
-                # %8 = subview on output tensor_view
                 sv2 = pto.SubviewOp(tile_view_32, tv1, [c0, c0], [c32, c32]).result
-
-                # pto.store_dps_tb ins(%tb1) outs(%sv2)
-                pto.TStoreOp(None, tb1, sv2)
+                pto.TStoreOp(None, tb_out, sv2)
 
                 func.ReturnOp([])
 
@@ -71,3 +63,4 @@ def build():
 
 if __name__ == "__main__":
     print(build())
+

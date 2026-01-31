@@ -3785,12 +3785,7 @@ def PTO_TDivSOp : PTO_TOp<"tdivs", []> {
 
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $scalar `:` qualified(type($src)) `,` type($scalar) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    (`scalar_lhs` `=` $scalar_lhs^)?
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let builders = [
     OpBuilder<(ins "TypeRange":$res, "Value":$src, "Value":$scalar, "Value":$dst), [{
